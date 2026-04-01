@@ -15,16 +15,19 @@ def get_client() -> Client:
 
 def get_teacher_embeddings(teacher_id: str) -> list[list[float]]:
     """Fetch stored face embeddings for a teacher."""
-    client = get_client()
-    result = (
-        client.table("std_teacher_faces")
-        .select("face_embeddings")
-        .eq("teacher_id", teacher_id)
-        .single()
-        .execute()
-    )
-    if result.data:
-        return result.data["face_embeddings"] or []
+    try:
+        client = get_client()
+        result = (
+            client.table("std_teacher_faces")
+            .select("face_embeddings")
+            .eq("teacher_id", teacher_id)
+            .maybe_single()
+            .execute()
+        )
+        if result.data:
+            return result.data["face_embeddings"] or []
+    except Exception:
+        pass
     return []
 
 
