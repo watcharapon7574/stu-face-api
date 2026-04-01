@@ -61,6 +61,71 @@ def update_teacher_embedding(teacher_id: str, embeddings: list[list[float]]) -> 
     ).eq("teacher_id", teacher_id).execute()
 
 
+def _get_check_in_time(service_point_id: str | None) -> str:
+    """Get check-in time with grace period for service units.
+
+    Service units (non-headquarters) get +30 min grace period.
+    During grace period (e.g. 9:01-9:30), record a random time
+    between 30 min before deadline (e.g. 8:30-9:00).
+    """
+    from datetime import datetime, timezone, timedelta
+    import random
+
+    tz = timezone(timedelta(hours=7))  # Thailand
+    now = datetime.now(tz)
+
+    if not service_point_id:
+        return now.astimezone(timezone.utc).isoformat()
+
+    try:
+        client = get_client()
+
+        # Check if headquarters
+        sp_result = (
+            client.table("std_service_points")
+            .select("is_headquarters")
+            .eq("id", service_point_id)
+            .maybe_single()
+            .execute()
+        )
+
+        is_hq = sp_result.data.get("is_headquarters", False) if sp_result.data else False
+
+        if is_hq:
+            return now.astimezone(timezone.utc).isoformat()
+
+        # Get check_in_end from settings
+        settings_result = (
+            client.table("std_teacher_settings")
+            .select("value")
+            .eq("key", "check_in_end")
+            .maybe_single()
+            .execute()
+        )
+
+        check_in_end_str = "09:00"
+        if settings_result.data:
+            check_in_end_str = settings_result.data["value"]
+
+        # Parse check_in_end
+        h, m = map(int, check_in_end_str.split(":"))
+        deadline = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        grace_end = deadline + timedelta(minutes=30)
+        random_start = deadline - timedelta(minutes=30)
+
+        # If within grace period (after deadline but before grace_end)
+        if deadline < now <= grace_end:
+            # Random time between (deadline - 30min) and deadline
+            random_seconds = random.randint(0, 30 * 60)
+            fake_time = random_start + timedelta(seconds=random_seconds)
+            return fake_time.astimezone(timezone.utc).isoformat()
+
+    except Exception:
+        pass
+
+    return now.astimezone(timezone.utc).isoformat()
+
+
 def save_teacher_attendance(
     teacher_id: str,
     date: str,
@@ -74,19 +139,20 @@ def save_teacher_attendance(
     client = get_client()
     from datetime import datetime, timezone
 
-    now = datetime.now(timezone.utc).isoformat()
-
     if check_type == "check_in":
+        # Apply grace period for service units
+        check_in_time = _get_check_in_time(service_point_id)
         data = {
             "teacher_id": teacher_id,
             "date": date,
-            "check_in": now,
+            "check_in": check_in_time,
             "confidence_in": confidence,
             "anti_spoof_score_in": anti_spoof_score,
             "device_fingerprint": device_fingerprint,
             "service_point_id": service_point_id,
         }
     else:
+        now = datetime.now(timezone.utc).isoformat()
         data = {
             "teacher_id": teacher_id,
             "date": date,
