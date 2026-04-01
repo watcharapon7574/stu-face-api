@@ -112,14 +112,16 @@ def blend_embeddings(
     return blended.tolist()
 
 
-def process_enrollment(images: list[np.ndarray]) -> dict:
-    """Process enrollment: extract embeddings + anti-spoofing check for all images."""
+def process_enrollment(images: list[np.ndarray], skip_anti_spoof: bool = False) -> dict:
+    """Process enrollment: extract embeddings + optional anti-spoofing check."""
     embeddings = []
     spoofing_results = []
 
     for img in images:
-        # Anti-spoofing check
-        spoof = check_anti_spoofing(img)
+        if skip_anti_spoof:
+            spoof = {"is_real": True, "score": 1.0}
+        else:
+            spoof = check_anti_spoofing(img)
         spoofing_results.append(spoof)
 
         if not spoof["is_real"]:

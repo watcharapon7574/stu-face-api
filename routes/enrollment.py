@@ -11,6 +11,7 @@ class EnrollRequest(BaseModel):
     teacher_id: str
     images: list[str]  # base64 encoded images (3 photos)
     device_fingerprint: str | None = None
+    skip_anti_spoof: bool = False
 
 
 class EnrollResponse(BaseModel):
@@ -37,9 +38,9 @@ async def enroll_teacher(req: EnrollRequest):
         raise HTTPException(status_code=400, detail=f"รูปภาพไม่ถูกต้อง: {str(e)}")
 
     # Process enrollment: extract embeddings + anti-spoofing
-    result = process_enrollment(images)
+    result = process_enrollment(images, skip_anti_spoof=req.skip_anti_spoof)
 
-    if not result["all_real"]:
+    if not req.skip_anti_spoof and not result["all_real"]:
         return EnrollResponse(
             success=False,
             embeddings_count=0,
