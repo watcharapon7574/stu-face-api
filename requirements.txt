@@ -1,0 +1,9 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+deepface==0.0.93
+supabase==2.11.0
+python-dotenv==1.0.1
+python-multipart==0.0.19
+Pillow==11.1.0
+numpy>=1.26.0
+tf-keras>=2.16.0
