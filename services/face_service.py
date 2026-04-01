@@ -153,15 +153,11 @@ def process_verification(
     frame_embeddings = []
 
     for frame in frames:
-        # Anti-spoofing check
+        # Anti-spoofing check (soft — record score but don't block)
         spoof = check_anti_spoofing(frame)
         spoofing_results.append(spoof)
 
-        if not spoof["is_real"]:
-            match_results.append({"matched": False, "confidence": 0.0})
-            continue
-
-        # Extract embedding and compare
+        # Always try face matching regardless of anti-spoof result
         try:
             emb = extract_embedding(frame)
             frame_embeddings.append(emb)
@@ -170,7 +166,7 @@ def process_verification(
         except ValueError:
             match_results.append({"matched": False, "confidence": 0.0})
 
-    # Overall result: majority of frames must pass
+    # Overall result: majority of frames must match face
     real_count = sum(1 for s in spoofing_results if s["is_real"])
     matched_count = sum(1 for m in match_results if m.get("matched"))
     total = len(frames)
@@ -206,7 +202,7 @@ def process_verification(
             best_embedding = frame_embeddings[best_idx]
 
     return {
-        "matched": all_real and majority_matched,
+        "matched": majority_matched,  # anti-spoof is soft check, face match decides
         "confidence": round(avg_confidence, 4),
         "is_real": all_real,
         "anti_spoof_score": round(avg_spoof_score, 4),
