@@ -25,6 +25,9 @@ MAX_FRAMES = 5
 BLEND_OLD_RATIO = 0.8
 BLEND_NEW_RATIO = 0.2
 
+# API Security
+API_SECRET_KEY = os.getenv("API_SECRET_KEY", "")  # Required: shared secret with Next.js
+
 # CORS
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
 

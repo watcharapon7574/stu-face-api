@@ -1,6 +1,7 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from config import ALLOWED_ORIGINS, PORT
+from fastapi.responses import JSONResponse
+from config import ALLOWED_ORIGINS, PORT, API_SECRET_KEY
 from routes.health import router as health_router
 from routes.enrollment import router as enrollment_router
 from routes.verify import router as verify_router
@@ -19,6 +20,31 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# API Key authentication middleware
+@app.middleware("http")
+async def verify_api_key(request: Request, call_next):
+    # Skip auth for health check and docs
+    if request.url.path in ("/health", "/docs", "/openapi.json", "/redoc"):
+        return await call_next(request)
+
+    if not API_SECRET_KEY:
+        # No key configured = reject all (force setup)
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "API_SECRET_KEY not configured on server"},
+        )
+
+    api_key = request.headers.get("X-API-Key")
+    if api_key != API_SECRET_KEY:
+        return JSONResponse(
+            status_code=401,
+            content={"detail": "Invalid or missing API key"},
+        )
+
+    return await call_next(request)
+
 
 # Routes
 app.include_router(health_router, tags=["Health"])
