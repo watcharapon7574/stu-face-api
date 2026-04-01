@@ -39,7 +39,7 @@ def extract_embedding(image: np.ndarray) -> list[float]:
 
 
 def check_anti_spoofing(image: np.ndarray) -> dict:
-    """Check if the face in the image is real (not a photo/video)."""
+    """Check if the face in the image is real (not a photo/video) using MiniFASNet."""
     if not ANTI_SPOOF_ENABLED:
         return {"is_real": True, "score": 1.0}
 
@@ -58,6 +58,48 @@ def check_anti_spoofing(image: np.ndarray) -> dict:
         return {"is_real": is_real, "score": score}
     except Exception:
         return {"is_real": False, "score": 0.0}
+
+
+def check_frame_variance(frames: list[np.ndarray], threshold: float = 2.0) -> dict:
+    """Check liveness by comparing pixel differences between frames.
+
+    Real faces have micro-movements between frames (blinks, breathing, tiny shifts).
+    Photos/static images are nearly identical across frames.
+
+    Args:
+        frames: list of RGB images as numpy arrays
+        threshold: minimum mean pixel difference to consider "alive"
+
+    Returns:
+        is_real: True if frames show enough variance (real face)
+        score: normalized variance score (0-1)
+        mean_diff: average pixel difference between consecutive frames
+    """
+    if len(frames) < 2:
+        return {"is_real": True, "score": 1.0, "mean_diff": 999.0}
+
+    diffs = []
+    for i in range(len(frames) - 1):
+        # Convert to grayscale for comparison
+        gray1 = np.mean(frames[i], axis=2)
+        gray2 = np.mean(frames[i + 1], axis=2)
+
+        # Resize to same size if needed
+        if gray1.shape != gray2.shape:
+            min_h = min(gray1.shape[0], gray2.shape[0])
+            min_w = min(gray1.shape[1], gray2.shape[1])
+            gray1 = gray1[:min_h, :min_w]
+            gray2 = gray2[:min_h, :min_w]
+
+        diff = np.abs(gray1.astype(float) - gray2.astype(float))
+        diffs.append(np.mean(diff))
+
+    mean_diff = float(np.mean(diffs))
+    # Normalize: score 0-1 where 1 = very different (definitely real)
+    score = min(mean_diff / 10.0, 1.0)
+    is_real = mean_diff >= threshold
+
+    return {"is_real": is_real, "score": round(score, 4), "mean_diff": round(mean_diff, 2)}
 
 
 def compare_embeddings(
@@ -147,17 +189,21 @@ def process_enrollment(images: list[np.ndarray], skip_anti_spoof: bool = False) 
 def process_verification(
     frames: list[np.ndarray], stored_embeddings: list[list[float]]
 ) -> dict:
-    """Process verification: anti-spoofing + face matching for all frames."""
+    """Process verification: frame variance liveness + face matching for all frames."""
     spoofing_results = []
     match_results = []
     frame_embeddings = []
 
+    # Primary anti-spoofing: multi-frame variance check
+    # Real face = micro-movements between frames, photo = identical frames
+    variance = check_frame_variance(frames)
+
     for frame in frames:
-        # Anti-spoofing check (soft — record score but don't block)
+        # MiniFASNet check (soft — record score only, don't block)
         spoof = check_anti_spoofing(frame)
         spoofing_results.append(spoof)
 
-        # Always try face matching regardless of anti-spoof result
+        # Always try face matching
         try:
             emb = extract_embedding(frame)
             frame_embeddings.append(emb)
@@ -166,12 +212,13 @@ def process_verification(
         except ValueError:
             match_results.append({"matched": False, "confidence": 0.0})
 
-    # Overall result: majority of frames must match face
+    # Overall result
     real_count = sum(1 for s in spoofing_results if s["is_real"])
     matched_count = sum(1 for m in match_results if m.get("matched"))
     total = len(frames)
 
-    all_real = real_count == total
+    # Liveness: use frame variance (primary) — real face has micro-movements
+    is_real = variance["is_real"]
     majority_matched = matched_count > total / 2
 
     # Average confidence from matched frames
@@ -202,11 +249,16 @@ def process_verification(
             best_embedding = frame_embeddings[best_idx]
 
     return {
-        "matched": majority_matched,  # anti-spoof is soft check, face match decides
+        "matched": is_real and majority_matched,  # must pass liveness + face match
         "confidence": round(avg_confidence, 4),
-        "is_real": all_real,
+        "is_real": is_real,
         "anti_spoof_score": round(avg_spoof_score, 4),
         "spoofing_scores": [round(s["score"], 4) for s in spoofing_results],
+        "frame_variance": {
+            "mean_diff": variance["mean_diff"],
+            "score": variance["score"],
+            "is_real": variance["is_real"],
+        },
         "frame_results": {
             "total": total,
             "real": real_count,
